@@ -1,5 +1,8 @@
 # GitHub Organization Commits Extractor & Visualizer
 
+<img width="1459" height="610" alt="image" src="https://github.com/user-attachments/assets/17e79e01-5d53-4fe5-91b4-7237ec550abc" />
+
+
 A Python script that fetches commit data for all members of a GitHub organization and exports it to CSV format, plus an HTML visualization tool that displays the data as a GitHub-style commits heatmap.
 
 ## Setup
