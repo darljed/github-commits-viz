@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Commits Heatmap</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 20px; transition: all 0.3s ease; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { margin-bottom: 20px; }
+        .heatmap { border-radius: 6px; padding: 20px; margin-bottom: 20px; transition: all 0.3s ease; }
+        .user-section { margin-bottom: 30px; }
+        .username { font-weight: 600; margin-bottom: 10px; }
+        .calendar-container { display: flex; }
+        .weekdays { display: flex; flex-direction: column; gap: 3px; margin-right: 10px; font-size: 9px; width: 20px; margin-top: 22px;}
+        .weekday { height: 11px; line-height: 11px; display: flex; align-items: center; justify-content: flex-end; }
+        .calendar-with-months { display: flex; flex-direction: column; }
+        .months { display: flex; gap: 3px; margin-bottom: 5px; font-size: 10px; }
+        .month { width: 14px; text-align: center; }
+        .calendar { display: flex; gap: 3px; }
+        .week { display: flex; flex-direction: column; gap: 3px; }
+        .day { width: 11px; height: 11px; border-radius: 2px; transition: all 0.3s ease; }
+        .legend { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 12px; }
+        .legend-item { width: 11px; height: 11px; border-radius: 2px; }
+        .download-btn { background: #238636; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-right: 10px; }
+        .download-btn:hover { background: #2ea043; }
+        .toggle-btn { padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; border: 1px solid; transition: all 0.3s ease; }
+        .toggle-btn.active { background: #238636; color: white; }
+        .theme-btn { background: #6f42c1; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-right: 10px; }
+        .theme-btn:hover { background: #8b5cf6; }
+        
+        /* Dark theme */
+        body.dark { background: #0d1117; color: #c9d1d9; }
+        .dark .heatmap { background: #161b22; border: 1px solid #30363d; }
+        .dark .username { color: #58a6ff; }
+        .dark .weekdays, .dark .months, .dark .legend { color: #7d8590; }
+        .dark .day { background: #161b22; border: 1px solid #21262d; }
+        .dark .day.level-1 { background: #0e4429; }
+        .dark .day.level-2 { background: #006d32; }
+        .dark .day.level-3 { background: #26a641; }
+        .dark .day.level-4 { background: #39d353; }
+        .dark .toggle-btn { background: #21262d; color: #c9d1d9; border-color: #30363d; }
+        .dark .toggle-btn:hover { background: #30363d; }
+        .dark .legend-item:first-of-type { background: #161b22; border: 1px solid #21262d; }
+        
+        /* Light theme */
+        body.light { background: #ffffff; color: #24292f; }
+        .light .heatmap { background: #f6f8fa; border: 1px solid #d0d7de; }
+        .light .username { color: #0969da; }
+        .light .weekdays, .light .months, .light .legend { color: #656d76; }
+        .light .day { background: #ebedf0; border: 1px solid #d0d7de; }
+        .light .day.level-1 { background: #9be9a8; }
+        .light .day.level-2 { background: #40c463; }
+        .light .day.level-3 { background: #30a14e; }
+        .light .day.level-4 { background: #216e39; }
+        .light .toggle-btn { background: #f6f8fa; color: #24292f; border-color: #d0d7de; }
+        .light .toggle-btn:hover { background: #f3f4f6; }
+        .light .legend-item:first-of-type { background: #ebedf0; border: 1px solid #d0d7de; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>GitHub Commits Heatmap</h1>
+            <div>
+                <button class="toggle-btn active" onclick="toggleView('individual')">Individual Users</button>
+                <button class="toggle-btn" onclick="toggleView('combined')">Combined View</button>
+                <button class="theme-btn" onclick="toggleTheme()">🌙 Dark</button>
+                <button class="download-btn" onclick="downloadImage()">Download as PNG</button>
+            </div>
+        </div>
+        <div id="heatmap" class="heatmap"></div>
+    </div>
+
+    <script>
+        let commitsData = {};
+        let currentView = 'individual';
+        let currentTheme = 'dark';
+        
+        // Initialize theme
+        document.body.className = currentTheme;
+
+        function parseCSV(text) {
+            const lines = text.trim().split('\n');
+            const data = {};
+            
+            for (let i = 1; i < lines.length; i++) {
+                const [username, date, commits] = lines[i].split(',');
+                if (!data[username]) data[username] = {};
+                data[username][date] = parseInt(commits);
+            }
+            return data;
+        }
+
+        function getCommitLevel(count, isCombined = false) {
+            if (count === 0) return 0;
+            if (isCombined) {
+                if (count <= 5) return 1;
+                if (count <= 15) return 2;
+                if (count <= 30) return 3;
+                return 4;
+            }
+            if (count <= 3) return 1;
+            if (count <= 6) return 2;
+            if (count <= 9) return 3;
+            return 4;
+        }
+
+        function generateCalendar(userData, startDate, endDate, isCombined = false) {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const weeks = [];
+            let currentWeek = [];
+            
+            // Start from the beginning of the week containing start date
+            const startOfWeek = new Date(start);
+            startOfWeek.setDate(start.getDate() - start.getDay());
+            
+            for (let d = new Date(startOfWeek); d <= end; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
+                const commits = userData[dateStr] || 0;
+                const level = getCommitLevel(commits, isCombined);
+                
+                currentWeek.push({ date: dateStr, commits, level });
+                
+                if (currentWeek.length === 7) {
+                    weeks.push(currentWeek);
+                    currentWeek = [];
+                }
+            }
+            
+            if (currentWeek.length > 0) {
+                weeks.push(currentWeek);
+            }
+            
+            return weeks;
+        }
+
+        function toggleView(view) {
+            currentView = view;
+            document.querySelectorAll('.toggle-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            renderHeatmap(commitsData);
+        }
+        
+        function toggleTheme() {
+            currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.body.className = currentTheme;
+            const btn = event.target;
+            btn.textContent = currentTheme === 'dark' ? '🌙 Dark' : '☀️ Light';
+        }
+
+        function getCombinedData(data) {
+            const combined = {};
+            Object.values(data).forEach(userData => {
+                Object.entries(userData).forEach(([date, commits]) => {
+                    combined[date] = (combined[date] || 0) + commits;
+                });
+            });
+            return combined;
+        }
+
+        function createMonthLabels(weeks) {
+            const months = [];
+            let currentMonth = null;
+            let weekCount = 0;
+            
+            weeks.forEach(week => {
+                const firstDay = new Date(week[0].date);
+                const month = firstDay.toLocaleDateString('en', { month: 'short' });
+                
+                if (month !== currentMonth) {
+                    months.push({ month, weekIndex: weekCount });
+                    currentMonth = month;
+                }
+                weekCount++;
+            });
+            
+            return months;
+        }
+
+        function renderHeatmap(data) {
+            const container = document.getElementById('heatmap');
+            container.innerHTML = '';
+            
+            const startDate = '2024-09-01';
+            const endDate = '2025-08-30';
+            
+            if (currentView === 'combined') {
+                const combinedData = getCombinedData(data);
+                const userSection = document.createElement('div');
+                userSection.className = 'user-section';
+                
+                const usernameDiv = document.createElement('div');
+                usernameDiv.className = 'username';
+                usernameDiv.textContent = 'Organization Combined';
+                userSection.appendChild(usernameDiv);
+                
+                const weeks = generateCalendar(combinedData, startDate, endDate, true);
+                const monthLabels = createMonthLabels(weeks);
+                
+                const calendarContainer = document.createElement('div');
+                calendarContainer.className = 'calendar-container';
+                
+                const weekdays = document.createElement('div');
+                weekdays.className = 'weekdays';
+                ['', 'Mon', '', 'Wed', '', 'Fri', ''].forEach(day => {
+                    const dayLabel = document.createElement('div');
+                    dayLabel.className = 'weekday';
+                    dayLabel.textContent = day;
+                    weekdays.appendChild(dayLabel);
+                });
+                
+                const calendarWithMonths = document.createElement('div');
+                calendarWithMonths.className = 'calendar-with-months';
+                
+                const monthsDiv = document.createElement('div');
+                monthsDiv.className = 'months';
+                let lastWeekIndex = 0;
+                monthLabels.forEach(({ month, weekIndex }) => {
+                    const spacer = weekIndex - lastWeekIndex;
+                    for (let i = 0; i < spacer; i++) {
+                        const emptyMonth = document.createElement('div');
+                        emptyMonth.className = 'month';
+                        monthsDiv.appendChild(emptyMonth);
+                    }
+                    const monthDiv = document.createElement('div');
+                    monthDiv.className = 'month';
+                    monthDiv.textContent = month;
+                    monthsDiv.appendChild(monthDiv);
+                    lastWeekIndex = weekIndex + 1;
+                });
+                
+                const calendar = document.createElement('div');
+                calendar.className = 'calendar';
+                
+                weeks.forEach(week => {
+                    const weekDiv = document.createElement('div');
+                    weekDiv.className = 'week';
+                    
+                    week.forEach(day => {
+                        const dayDiv = document.createElement('div');
+                        dayDiv.className = `day level-${day.level}`;
+                        dayDiv.title = `${day.date}: ${day.commits} commits`;
+                        weekDiv.appendChild(dayDiv);
+                    });
+                    
+                    calendar.appendChild(weekDiv);
+                });
+                
+                calendarWithMonths.appendChild(monthsDiv);
+                calendarWithMonths.appendChild(calendar);
+                calendarContainer.appendChild(weekdays);
+                calendarContainer.appendChild(calendarWithMonths);
+                userSection.appendChild(calendarContainer);
+                container.appendChild(userSection);
+            } else {
+                Object.entries(data).forEach(([username, userData]) => {
+                    const userSection = document.createElement('div');
+                    userSection.className = 'user-section';
+                    
+                    const usernameDiv = document.createElement('div');
+                    usernameDiv.className = 'username';
+                    usernameDiv.textContent = username;
+                    userSection.appendChild(usernameDiv);
+                    
+                    const weeks = generateCalendar(userData, startDate, endDate);
+                    const monthLabels = createMonthLabels(weeks);
+                    
+                    const calendarContainer = document.createElement('div');
+                    calendarContainer.className = 'calendar-container';
+                    
+                    const weekdays = document.createElement('div');
+                    weekdays.className = 'weekdays';
+                    ['', 'Mon', '', 'Wed', '', 'Fri', ''].forEach(day => {
+                        const dayLabel = document.createElement('div');
+                        dayLabel.className = 'weekday';
+                        dayLabel.textContent = day;
+                        weekdays.appendChild(dayLabel);
+                    });
+                    
+                    const calendarWithMonths = document.createElement('div');
+                    calendarWithMonths.className = 'calendar-with-months';
+                    
+                    const monthsDiv = document.createElement('div');
+                    monthsDiv.className = 'months';
+                    let lastWeekIndex = 0;
+                    monthLabels.forEach(({ month, weekIndex }) => {
+                        const spacer = weekIndex - lastWeekIndex;
+                        for (let i = 0; i < spacer; i++) {
+                            const emptyMonth = document.createElement('div');
+                            emptyMonth.className = 'month';
+                            monthsDiv.appendChild(emptyMonth);
+                        }
+                        const monthDiv = document.createElement('div');
+                        monthDiv.className = 'month';
+                        monthDiv.textContent = month;
+                        monthsDiv.appendChild(monthDiv);
+                        lastWeekIndex = weekIndex + 1;
+                    });
+                    
+                    const calendar = document.createElement('div');
+                    calendar.className = 'calendar';
+                    
+                    weeks.forEach(week => {
+                        const weekDiv = document.createElement('div');
+                        weekDiv.className = 'week';
+                        
+                        week.forEach(day => {
+                            const dayDiv = document.createElement('div');
+                            dayDiv.className = `day level-${day.level}`;
+                            dayDiv.title = `${day.date}: ${day.commits} commits`;
+                            weekDiv.appendChild(dayDiv);
+                        });
+                        
+                        calendar.appendChild(weekDiv);
+                    });
+                    
+                    calendarWithMonths.appendChild(monthsDiv);
+                    calendarWithMonths.appendChild(calendar);
+                    calendarContainer.appendChild(weekdays);
+                    calendarContainer.appendChild(calendarWithMonths);
+                    userSection.appendChild(calendarContainer);
+                    container.appendChild(userSection);
+                });
+            }
+            
+            // Add legend
+            const legend = document.createElement('div');
+            legend.className = 'legend';
+            legend.innerHTML = `
+                Less
+                <div class="legend-item" style="background: #161b22; border: 1px solid #21262d;"></div>
+                <div class="legend-item" style="background: #0e4429;"></div>
+                <div class="legend-item" style="background: #006d32;"></div>
+                <div class="legend-item" style="background: #26a641;"></div>
+                <div class="legend-item" style="background: #39d353;"></div>
+                More
+            `;
+            container.appendChild(legend);
+        }
+
+        function downloadImage() {
+            const element = document.getElementById('heatmap');
+            
+            // Create canvas
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size
+            canvas.width = element.offsetWidth;
+            canvas.height = element.offsetHeight;
+            
+            // Fill background
+            ctx.fillStyle = '#161b22';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw heatmap
+            const userSections = element.querySelectorAll('.user-section');
+            let yOffset = 20;
+            
+            userSections.forEach(section => {
+                const username = section.querySelector('.username').textContent;
+                
+                // Draw username
+                ctx.fillStyle = '#58a6ff';
+                ctx.font = '14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+                ctx.fillText(username, 20, yOffset);
+                yOffset += 25;
+                
+                // Draw weekday labels
+                ctx.fillStyle = '#7d8590';
+                ctx.font = '9px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+                ['Mon', 'Wed', 'Fri'].forEach((day, i) => {
+                    ctx.fillText(day, 20, yOffset + 20 + (i * 2 + 1) * 14);
+                });
+                
+                // Draw month labels
+                const months = section.querySelectorAll('.month');
+                let monthXOffset = 50;
+                months.forEach(month => {
+                    if (month.textContent) {
+                        ctx.fillText(month.textContent, monthXOffset, yOffset + 10);
+                    }
+                    monthXOffset += 14;
+                });
+                
+                // Draw calendar
+                const weeks = section.querySelectorAll('.week');
+                let xOffset = 50;
+                
+                weeks.forEach(week => {
+                    const days = week.querySelectorAll('.day');
+                    let dayYOffset = yOffset + 20;
+                    
+                    days.forEach(day => {
+                        const classes = day.className.split(' ');
+                        const level = classes.find(c => c.startsWith('level-'));
+                        
+                        let color = '#161b22';
+                        if (level === 'level-1') color = '#0e4429';
+                        else if (level === 'level-2') color = '#006d32';
+                        else if (level === 'level-3') color = '#26a641';
+                        else if (level === 'level-4') color = '#39d353';
+                        
+                        ctx.fillStyle = color;
+                        ctx.fillRect(xOffset, dayYOffset, 11, 11);
+                        
+                        dayYOffset += 14;
+                    });
+                    
+                    xOffset += 14;
+                });
+                
+                yOffset += 130;
+            });
+            
+            // Download with appropriate filename
+            const filename = currentView === 'combined' ? 'commits-heatmap-combined.png' : 'commits-heatmap-individual.png';
+            
+            // Download
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+
+        // Load CSV data
+        fetch('commits_by_user.csv')
+            .then(response => response.text())
+            .then(text => {
+                commitsData = parseCSV(text);
+                renderHeatmap(commitsData);
+            })
+            .catch(error => {
+                console.error('Error loading CSV:', error);
+                document.getElementById('heatmap').innerHTML = '<p>Error loading commits_by_user.csv. Please ensure the file exists in the same directory.</p>';
+            });
+    </script>
+</body>
+</html>
